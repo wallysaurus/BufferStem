@@ -19,23 +19,26 @@ wav, sr = ta.load("loyalty.wav")
 #         ]
 #     )
 
-# Initialize the separator
 separator = demucs.api.Separator(progress=True, jobs=5, overlap=0.1, device="cuda")
 
+# This function runs on its own thread, so it's okay that we
+# shove all the chunks immediately into the separator. Once
+# each chunk finishes, it'll get passed to the queue and played
+# on another thread giving the illusion of asynchronous output.
 def stemsplit(q, duration=10, output="vocals"):
     num_chunks = math.floor(len(wav[0]) / (sr * duration))
     for i in range(num_chunks):
-        # Extract 5-second chunk
         three_seconds = torch.tensor(
             [
+                # Sample Rate * iteration offset * duration (seconds) = startpos
                 wav[0].tolist()[sr * i * duration:][: sr * duration],
                 wav[1].tolist()[sr * i * duration:][: sr * duration]
             ]
         )
-        # Separate the audio
         _, separated = separator.separate_tensor(three_seconds)
         q.put(separated[output])  # Add the separated chunk to the queue
 
+# This will eventually get cleaned up. It sucks right now.
 def play_audio(q):
     current_chunk = None  # Holds the current audio chunk being processed
     pos = 0  # Current position within the chunk
@@ -48,8 +51,8 @@ def play_audio(q):
         # Fetch new chunk if current is exhausted
         if current_chunk is None or pos >= current_chunk.shape[0]:
             try:
-                chunk = q.get_nowait()  # Non-blocking get
-                if chunk is None:  # Termination signal
+                chunk = q.get_nowait()
+                if chunk is None:
                     raise sd.CallbackAbort
                 # Convert tensor to numpy and transpose to (samples, channels)
                 current_chunk = chunk.numpy().T.astype(np.float32)
